@@ -1,0 +1,49 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email in ["ismael.charu2015@gmail.com", "ismael.charu2018@gmail.com", "admin@rumahsekolah.com"] ||
+        request.auth.uid in ["6WkoIIyNCZef1NP6aoHtMKOoeSo1", "HIsfiO4Vh6MTUYT6QZToCWjqpHn1"]
+      );
+    }
+
+    // Public read for products and settings - required for shop operation
+    match /products/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /settings/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Allow users to upload their own profile photos
+    match /profiles/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId;
+    }
+    
+    // Legacy support for the utility that generates unique paths in /profiles/
+    match /profiles/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // Only owner and admin can read/write slips
+    match /slips/{userId}/{allPaths=**} {
+      allow read: if (isSignedIn() && request.auth.uid == userId) || isAdmin();
+      allow write: if (isSignedIn() && request.auth.uid == userId) || userId == "guests";
+    }
+
+    // General fallback for admins
+    match /{allPaths=**} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+  }
+}

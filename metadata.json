@@ -1,0 +1,8 @@
+{
+  "name": "Remix: RumahSekolah",
+  "description": "RumahSekolah - แพลตฟอร์มอีคอมเมิร์ซที่ทันสมัยและครบวงจร พร้อมระบบจัดการสินค้าและชำระเงินที่ปลอดภัย",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

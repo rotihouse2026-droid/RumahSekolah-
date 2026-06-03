@@ -1,0 +1,128 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default-deny Catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Auth helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == "ismael.charu2015@gmail.com"
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // ------------------ PRODUCTS ------------------
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ------------------ CATEGORIES ------------------
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ------------------ SETTINGS ------------------
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ------------------ ORDERS ------------------
+    match /orders/{orderId} {
+      allow create: if isSignedIn();
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isSignedIn() && (
+        // Users can upload receipt slip to their OWN pending orders
+        (resource.data.userId == request.auth.uid && 
+         resource.data.status == 'pending' && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['slipUrl', 'paymentSlip', 'paymentSlipBase64', 'updatedAt'])) ||
+        // Users can confirm receipt (status -> delivered)
+        (resource.data.userId == request.auth.uid &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'deliveredAt', 'pointsGranted', 'updatedAt']) &&
+         request.resource.data.status == 'delivered') ||
+        // Admins can manage status, trackingNumber, or anything
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ------------------ USERS ------------------
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // ------------------ ADMINS ------------------
+    match /admins/{adminId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ------------------ REVIEWS ------------------
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // ------------------ POINT TRANSACTIONS ------------------
+    match /pointTransactions/{txId} {
+      allow create: if isSignedIn();
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    // ------------------ COUPONS ------------------
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ------------------ SLIPS ------------------
+    match /slips/{slipId} {
+      allow create: if isSignedIn() && (request.resource.data.uid == request.auth.uid || request.resource.data.uid == null);
+      allow read: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow update: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ------------------ STATS ------------------
+    match /stats/{statId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ------------------ CONTACTS ------------------
+    match /contacts/{contactId} {
+      allow create: if true;
+      allow read, write: if isAdmin();
+    }
+
+    // ------------------ NOTIFICATIONS ------------------
+    match /notifications/{notificationId} {
+      allow create: if isSignedIn() && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isSignedIn() && (
+        (resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+  }
+}
