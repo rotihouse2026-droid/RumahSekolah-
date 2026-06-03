@@ -7,7 +7,7 @@ service firebase.storage {
 
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email in ["ismael.charu2015@gmail.com", "ismael.charu2018@gmail.com", "admin@rumahsekolah.com"] ||
+        request.auth.token.email in ["ismael.charu2025@gmail.com", "ismael.charu2018@gmail.com", "admin@rumahsekolah.com"] ||
         request.auth.uid in ["6WkoIIyNCZef1NP6aoHtMKOoeSo1", "HIsfiO4Vh6MTUYT6QZToCWjqpHn1"]
       );
     }

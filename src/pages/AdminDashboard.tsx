@@ -173,7 +173,7 @@ const AdminDashboard = () => {
     facebookLink: 'https://www.facebook.com/rumahsekolahsaya?_rdc=1&_rdr#',
     instagramLink: 'https://www.instagram.com/ismael_charu/',
     youtubeLink: 'https://www.youtube.com/@Rumah-Sekolah',
-    adminEmails: ['ismael.charu2015@gmail.com', 'ismael.charu2018@gmail.com'],
+    adminEmails: ['ismael.charu2025@gmail.com', 'ismael.charu2018@gmail.com'],
     tierRules: {
       silver: { minSpending: 0, months: 0 },
       gold: { minSpending: 12000, months: 12 },
@@ -210,7 +210,7 @@ const AdminDashboard = () => {
     lowStock: 0
   });
   
-  const defaultAdminEmails = ['ismael.charu2015@gmail.com', 'ismael.charu2018@gmail.com', 'admin@rumahsekolah.com'];
+  const defaultAdminEmails = ['ismael.charu2025@gmail.com', 'ismael.charu2018@gmail.com', 'admin@rumahsekolah.com'];
   const allowedAdmins = shopSettings?.adminEmails?.length > 0 ? shopSettings.adminEmails : defaultAdminEmails;
   const isFirebaseAdmin = auth.currentUser && (
     allowedAdmins.includes(auth.currentUser.email || '') || 
@@ -3087,7 +3087,7 @@ const AdminDashboard = () => {
                           <button 
                             type="button"
                             onClick={() => {
-                              if (email === 'ismael.charu2015@gmail.com' || email === 'ismael.charu2018@gmail.com') return;
+                              if (email === 'ismael.charu2025@gmail.com' || email === 'ismael.charu2018@gmail.com') return;
                               if (window.confirm(`ต้องการถอนสิทธิ์ผู้ดูแลระบบของ ${email} ใช่หรือไม่?`)) {
                                 setShopSettings({...shopSettings, adminEmails: (shopSettings.adminEmails || defaultAdminEmails).filter((e: string) => e !== email)});
                                 toast.info('ถอนสิทธิ์ชั่วคราวแล้ว อย่าลบกด "บันทึกการตั้งค่า" เพื่อบันทึกถาวร');

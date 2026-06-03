@@ -15,7 +15,7 @@ const AdminLogin = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const defaultAdminEmails = ['ismael.charu2015@gmail.com', 'ismael.charu2018@gmail.com', 'admin@rumahsekolah.com'];
+  const defaultAdminEmails = ['ismael.charu2025@gmail.com', 'ismael.charu2018@gmail.com', 'admin@rumahsekolah.com'];
 
   useEffect(() => {
     const checkAdmin = async () => {

@@ -55,7 +55,7 @@ export const RealtimeNotificationManager: React.FC = () => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        if (user.email === "ismael.charu2015@gmail.com") {
+        if (user.email === "ismael.charu2025@gmail.com") {
           setIsAdmin(true);
         } else {
           try {

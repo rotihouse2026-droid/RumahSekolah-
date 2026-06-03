@@ -152,7 +152,7 @@ const verifyAdmin = async (req: any, res: any, next: any) => {
     const isAdmin = 
       uid === "6WkoIIyNCZef1NP6aoHtMKOoeSo1" ||
       uid === "HIsfiO4Vh6MTUYT6QZToCWjqpHn1" ||
-      (email === "ismael.charu2015@gmail.com" ||
+      (email === "ismael.charu2025@gmail.com" ||
        email === "ismael.charu2018@gmail.com" ||
        email === "admin@rumahsekolah.com"
       );
