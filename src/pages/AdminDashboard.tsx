@@ -695,7 +695,16 @@ const AdminDashboard = () => {
   });
   
   const defaultAdminEmails = ['ismael.charu2015@gmail.com', 'ismael.charu2025@gmail.com', 'ismael.charu2018@gmail.com', 'admin@rumahsekolah.com'];
-  const allowedAdmins = shopSettings?.adminEmails?.length > 0 ? shopSettings.adminEmails : defaultAdminEmails;
+  const getAllowedAdminsArray = () => {
+    let emailsArray: string[] = [];
+    if (Array.isArray(shopSettings?.adminEmails)) {
+      emailsArray = shopSettings.adminEmails;
+    } else if (typeof shopSettings?.adminEmails === 'string') {
+      emailsArray = shopSettings.adminEmails.split(',').map((e: any) => e.trim()).filter(Boolean);
+    }
+    return emailsArray.length > 0 ? emailsArray : defaultAdminEmails;
+  };
+  const allowedAdmins = getAllowedAdminsArray();
   const isFirebaseAdmin = auth.currentUser && (
     allowedAdmins.includes(auth.currentUser.email || '') || 
     auth.currentUser.uid === 'HIsfiO4Vh6MTUYT6QZToCWjqpHn1' ||
@@ -3608,7 +3617,7 @@ const AdminDashboard = () => {
                   </div>
                   <div className="space-y-2">
                     <div className="flex flex-wrap gap-1.5">
-                      {(shopSettings.adminEmails || defaultAdminEmails).map((email: string) => (
+                      {getAllowedAdminsArray().map((email: string) => (
                         <div key={email} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 text-gray-600 rounded-full text-xs font-bold border border-gray-100">
                           {email}
                           <button 
@@ -3616,7 +3625,7 @@ const AdminDashboard = () => {
                             onClick={() => {
                               if (email === 'ismael.charu2025@gmail.com' || email === 'ismael.charu2018@gmail.com') return;
                               if (window.confirm(`ต้องการถอนสิทธิ์ผู้ดูแลระบบของ ${email} ใช่หรือไม่?`)) {
-                                setShopSettings({...shopSettings, adminEmails: (shopSettings.adminEmails || defaultAdminEmails).filter((e: string) => e !== email)});
+                                setShopSettings({...shopSettings, adminEmails: getAllowedAdminsArray().filter((e: string) => e !== email)});
                                 toast.info('ถอนสิทธิ์ชั่วคราวแล้ว อย่าลบกด "บันทึกการตั้งค่า" เพื่อบันทึกถาวร');
                               }
                             }}
@@ -3636,8 +3645,9 @@ const AdminDashboard = () => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
                           const val = e.currentTarget.value.trim();
-                          if (val && !shopSettings.adminEmails?.includes(val)) {
-                            setShopSettings({...shopSettings, adminEmails: [...(shopSettings.adminEmails || []), val]});
+                          const currentAdmins = getAllowedAdminsArray();
+                          if (val && !currentAdmins.includes(val)) {
+                            setShopSettings({...shopSettings, adminEmails: [...currentAdmins, val]});
                             e.currentTarget.value = '';
                           }
                         }

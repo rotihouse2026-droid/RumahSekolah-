@@ -30,7 +30,14 @@ const Navigation: React.FC = () => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        if (user.email === "ismael.charu2025@gmail.com") {
+        const isDefaultAdmin = [
+          "ismael.charu2015@gmail.com",
+          "ismael.charu2025@gmail.com",
+          "ismael.charu2018@gmail.com",
+          "admin@rumahsekolah.com"
+        ].includes(user.email || '');
+
+        if (isDefaultAdmin) {
           setIsAdmin(true);
           // อัปเดตอีเมลแอดมินในฐานข้อมูล Firebase (settings/shop) อัตโนมัติเมื่อแอดมินล็อกอิน
           try {
@@ -38,16 +45,35 @@ const Navigation: React.FC = () => {
             const shopSnap = await getDoc(shopDocRef);
             if (shopSnap.exists()) {
               const data = shopSnap.data();
-              const emails: string[] = data.adminEmails || [];
-              if (!emails.includes("ismael.charu2025@gmail.com") || emails.includes("ismael.charu2015@gmail.com")) {
-                let updatedEmails = emails.filter(e => e !== "ismael.charu2015@gmail.com");
-                if (!updatedEmails.includes("ismael.charu2025@gmail.com")) {
-                  updatedEmails.push("ismael.charu2025@gmail.com");
+              let emailsArray: string[] = [];
+              if (Array.isArray(data.adminEmails)) {
+                emailsArray = data.adminEmails;
+              } else if (typeof data.adminEmails === 'string') {
+                emailsArray = (data.adminEmails as string).split(',').map(e => e.trim()).filter(Boolean);
+              }
+
+              // Ensure current admin email is included
+              if (user.email && !emailsArray.includes(user.email)) {
+                emailsArray.push(user.email);
+              }
+
+              // Let's always make sure key admins are included and any unwanted state is resolved
+              const originalLength = Array.isArray(data.adminEmails) ? data.adminEmails.length : -1;
+              const hasMismatch = !Array.isArray(data.adminEmails) || 
+                                  !emailsArray.includes('ismael.charu2015@gmail.com') ||
+                                  !emailsArray.includes('ismael.charu2025@gmail.com');
+
+              if (hasMismatch || emailsArray.length !== originalLength) {
+                if (!emailsArray.includes('ismael.charu2015@gmail.com')) {
+                  emailsArray.push('ismael.charu2015@gmail.com');
+                }
+                if (!emailsArray.includes('ismael.charu2025@gmail.com')) {
+                  emailsArray.push('ismael.charu2025@gmail.com');
                 }
                 await updateDoc(shopDocRef, {
-                  adminEmails: updatedEmails
+                  adminEmails: emailsArray
                 });
-                console.log("Successfully migrated admin emails in Firestore settings!");
+                console.log("Successfully migrated and corrected admin emails format in Firestore settings!");
               }
             }
           } catch (migrateErr) {
