@@ -376,10 +376,10 @@ const UserProfile: React.FC = () => {
       const newAddress = {
         ...addressData,
         id: editingAddressId || Math.random().toString(36).substr(2, 9),
-        isDefault: profile?.addresses?.length === 0 ? true : addressData.isDefault
+        isDefault: (!profile?.addresses || !Array.isArray(profile.addresses) || profile.addresses.length === 0) ? true : addressData.isDefault
       };
 
-      let updatedAddresses = [...(profile?.addresses || [])];
+      let updatedAddresses = [...(Array.isArray(profile?.addresses) ? profile.addresses : [])];
       
       if (editingAddressId) {
         updatedAddresses = updatedAddresses.map(addr => addr.id === editingAddressId ? newAddress : addr);
@@ -424,13 +424,13 @@ const UserProfile: React.FC = () => {
   };
 
   const handleDeleteAddress = async (addressId: string) => {
-    if (!user || !(profile?.addresses)) return;
+    if (!user || !profile || !Array.isArray(profile.addresses)) return;
     if (!window.confirm('คุณต้องการลบที่อยู่นี้ใช่หรือไม่?')) return;
     try {
       setLoading(true);
-      const updatedAddresses = (profile.addresses || []).filter((addr: any) => addr.id !== addressId);
+      const updatedAddresses = (Array.isArray(profile.addresses) ? profile.addresses : []).filter((addr: any) => addr.id !== addressId);
       
-      const wasDefault = profile.addresses.find((a: any) => a.id === addressId)?.isDefault;
+      const wasDefault = (Array.isArray(profile.addresses) ? profile.addresses : []).find((a: any) => a.id === addressId)?.isDefault;
       if (wasDefault && updatedAddresses.length > 0) {
         updatedAddresses[0].isDefault = true;
       }
@@ -465,10 +465,10 @@ const UserProfile: React.FC = () => {
   };
 
    const handleSetDefaultAddress = async (addressId: string) => {
-    if (!user || !(profile?.addresses)) return;
+    if (!user || !profile || !Array.isArray(profile.addresses)) return;
     try {
       setLoading(true);
-      const updatedAddresses = (profile.addresses || []).map((addr: any) => ({
+      const updatedAddresses = (Array.isArray(profile.addresses) ? profile.addresses : []).map((addr: any) => ({
         ...addr,
         isDefault: addr.id === addressId
       }));
@@ -645,20 +645,33 @@ const UserProfile: React.FC = () => {
   const memberTier = getMemberTier();
   const totalSpending = orders.filter(o => o.status === 'delivered').reduce((sum, o) => sum + (o.total || 0), 0);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 border-4 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Loading Hub...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-4xl mx-auto px-4 py-12">
-      {quotaError && (
+    <div className="max-w-4xl mx-auto px-4 py-12 animate-fade-in">
+      {loading ? (
+        <div className="space-y-6 animate-pulse">
+          {/* Header Skeleton */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-150 flex flex-col md:flex-row items-center gap-6">
+            <div className="w-20 h-20 rounded-full bg-slate-200" />
+            <div className="space-y-2 flex-grow text-center md:text-left">
+              <div className="h-5 bg-slate-200 rounded w-1/4 mx-auto md:mx-0" />
+              <div className="h-4 bg-slate-200 rounded w-1/3 mx-auto md:mx-0" />
+            </div>
+            <div className="h-10 bg-slate-200 rounded-xl w-32" />
+          </div>
+
+          {/* Stats Skeletons */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="bg-white rounded-2xl p-5 border border-slate-150 h-24" />
+            ))}
+          </div>
+
+          {/* Content Skeletons */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-150 h-64" />
+        </div>
+      ) : (
+        <>
+          {quotaError && (
         <div className="mb-8 p-4 bg-orange-50 border border-orange-100 rounded-2xl flex items-center gap-3 text-left">
             <AlertTriangle className="text-orange-500 shrink-0" size={20} />
             <p className="text-sm font-medium text-orange-800 flex-1">{quotaError}</p>
@@ -760,7 +773,7 @@ const UserProfile: React.FC = () => {
                   { id: 'orders', label: 'รายการคำสั่งซื้อ', sub: `ประวัติและการติดตาม (${orders.length})`, icon: <Package size={20} /> },
                   { id: 'notifications', label: 'แจ้งเตือน', sub: notifications.filter(n => n.status === 'unread').length > 0 ? `ใหม่ ${notifications.filter(n => n.status === 'unread').length} ข้อความ` : 'ดูการแจ้งเตือนทั้งหมด', icon: <Mail size={20} />, badge: notifications.filter(n => n.status === 'unread').length },
                   { id: 'points', label: 'สิทธิพิเศษ', sub: 'รายละเอียดระดับสมาชิกและแต้ม', icon: <Coins size={20} /> },
-                  { id: 'addresses', label: 'ข้อมูลที่อยู่', sub: profile?.addresses?.find((a: any) => a.isDefault)?.addressLine1 || 'ตั้งค่าที่อยู่หลัก', icon: <MapPin size={20} /> },
+                  { id: 'addresses', label: 'ข้อมูลที่อยู่', sub: (Array.isArray(profile?.addresses) ? profile.addresses : []).find((a: any) => a.isDefault)?.addressLine1 || 'ตั้งค่าที่อยู่หลัก', icon: <MapPin size={20} /> },
                   { id: 'settings', label: 'ตั้งค่าบัญชี', sub: 'แก้ไขโปรไฟล์และรหัสผ่าน', icon: <Settings size={20} /> },
                 ].map((item) => (
                   <button
@@ -1211,7 +1224,7 @@ const UserProfile: React.FC = () => {
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {((profile?.addresses && profile.addresses.length > 0) 
+                        {((profile?.addresses && Array.isArray(profile.addresses) && profile.addresses.length > 0) 
                           ? profile.addresses 
                           : (profile?.addressLine1 ? [{
                               id: 'default_legacy',
@@ -1432,6 +1445,8 @@ const UserProfile: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+        </>
+      )}
     </div>
   );
 };

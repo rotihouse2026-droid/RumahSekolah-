@@ -38,6 +38,9 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve('.'),
+        'firebase/firestore': path.resolve('./src/db.ts'),
+        'firebase/auth': path.resolve('./src/auth.ts'),
+        'firebase/storage': path.resolve('./src/storage_mock.ts'),
       },
     },
     server: {

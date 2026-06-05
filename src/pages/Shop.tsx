@@ -10,13 +10,13 @@ import { getGoogleDriveDirectLink } from '../utils/googleDrive';
 import { handleFirestoreError, OperationType } from '../utils/firebaseErrors';
 
 const Shop = ({ settings, categories: initialCategories }: { settings: any, categories: any[] }) => {
-  const { addToCart } = useCart();
+  const { addToCart, productsCache, setProductsCache } = useCart();
   const navigate = useNavigate();
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>(productsCache);
   const [categories, setCategories] = useState<string[]>(['All']);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(productsCache.length === 0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -34,8 +34,9 @@ const Shop = ({ settings, categories: initialCategories }: { settings: any, cate
 
   const fetchFromFirestore = async (isInitial = false) => {
     if (isInitial) {
-      setLoading(true);
-      setProducts([]);
+      if (products.length === 0) {
+        setLoading(true);
+      }
     } else {
       setLoadingMore(true);
     }
@@ -62,6 +63,7 @@ const Shop = ({ settings, categories: initialCategories }: { settings: any, cate
 
       if (isInitial) {
         setProducts(productData);
+        setProductsCache(productData);
       } else {
         setProducts(prev => {
           const combined = [...prev, ...productData];
@@ -112,16 +114,8 @@ const Shop = ({ settings, categories: initialCategories }: { settings: any, cate
     return matchesCategory && matchesSearch;
   });
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full"></div>
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 py-6 space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900 leading-tight">ร้านค้า</h1>
@@ -159,7 +153,23 @@ const Shop = ({ settings, categories: initialCategories }: { settings: any, cate
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-        {filteredProducts.map((product) => (
+        {loading ? (
+          Array.from({ length: 8 }).map((_, idx) => (
+            <div key={`skeleton-${idx}`} className="bg-white rounded-xl overflow-hidden border border-gray-100 animate-pulse h-fit">
+              <div className="aspect-square bg-gray-100" />
+              <div className="p-3 sm:p-4 space-y-2">
+                <div className="h-3 bg-gray-100 rounded-lg w-1/3" />
+                <div className="h-4 bg-gray-100 rounded-lg w-3/4 animate-pulse" />
+                <div className="flex items-center justify-between gap-1.5 pt-1">
+                  <div className="h-5 bg-gray-100 rounded-lg w-1/2" />
+                  <div className="w-10 h-10 bg-gray-100 rounded-xl shrink-0" />
+                </div>
+                <div className="h-8 bg-gray-100 rounded-xl w-full" />
+              </div>
+            </div>
+          ))
+        ) : (
+          filteredProducts.map((product) => (
           <motion.div 
             layout
             key={product.id}
@@ -237,7 +247,7 @@ const Shop = ({ settings, categories: initialCategories }: { settings: any, cate
               </div>
             </div>
           </motion.div>
-        ))}
+        )))}
       </div>
 
       {hasMore && (

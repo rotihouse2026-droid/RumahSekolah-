@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db, auth } from '../firebase';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, increment, getDoc, serverTimestamp, setDoc, addDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, getCountFromServer, getAggregateFromServer, sum, where } from 'firebase/firestore';
-import { onAuthStateChanged, signOut, sendPasswordResetEmail } from 'firebase/auth';
+import { onAuthStateChanged, signOut, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { handleFirestoreError, OperationType } from '../utils/firebaseErrors';
 import { GoogleGenAI } from '@google/genai';
 
@@ -23,6 +23,8 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (tab) {
       setActiveTab(tab as any);
+    } else {
+      setActiveTab('orders');
     }
   }, [tab]);
   const [dbStats, setDbStats] = useState({
@@ -33,6 +35,472 @@ const AdminDashboard = () => {
     transactions: 0,
     slips: 0
   });
+
+  const [sheetsConfig, setSheetsConfig] = useState({
+    spreadsheetId: '',
+    spreadsheetUrl: '',
+    accessToken: '',
+    lastSyncedAt: ''
+  });
+  const [manualSheetInput, setManualSheetInput] = useState('');
+  const [manualTokenInput, setManualTokenInput] = useState('');
+  const [isConnectingSheets, setIsConnectingSheets] = useState(false);
+  const [isSyncingExport, setIsSyncingExport] = useState(false);
+  const [isSyncingImport, setIsSyncingImport] = useState(false);
+
+  const fetchSheetsConfig = async () => {
+    try {
+      const docSnap = await getDoc(doc(db, 'settings', 'sheets'));
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const configData = {
+          spreadsheetId: data.spreadsheetId || '',
+          spreadsheetUrl: data.spreadsheetUrl || '',
+          accessToken: data.accessToken || '',
+          lastSyncedAt: data.lastSyncedAt || ''
+        };
+        setSheetsConfig(configData);
+        setManualSheetInput(data.spreadsheetId || '');
+        setManualTokenInput(data.accessToken || '');
+      }
+    } catch (e) {
+      console.error("Failed to load sheets config:", e);
+    }
+  };
+
+  const ensureSheetsExist = async (token: string, spreadsheetId: string) => {
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error("ไม่สามารถอ่านสัญญลักษณ์ของชีตได้");
+    const data = await res.json();
+    const existingTitles = data.sheets.map((s: any) => s.properties.title);
+    
+    const requiredTitles = ['สินค้า', 'หมวดหมู่', 'คูปอง', 'คำสั่งซื้อ', 'ลูกค้า', 'รีวิว'];
+    const requests: any[] = [];
+    
+    requiredTitles.forEach(title => {
+      if (!existingTitles.includes(title)) {
+        requests.push({
+          addSheet: {
+            properties: { title }
+          }
+        });
+      }
+    });
+    
+    if (requests.length > 0) {
+      const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ requests })
+      });
+      if (!updateRes.ok) console.warn("Could not create sheet tabs dynamically");
+    }
+  };
+
+  const getSheetsToken = async (): Promise<string | null> => {
+    let token = sessionStorage.getItem('google_sheets_access_token') || sheetsConfig.accessToken;
+    if (token) return token;
+
+    const inputToken = prompt("กรุณาใส่ Google Access Token สำหรับซิงค์ข้อมูล (เนื่องจาก Google บล็อกหน้าต่าง Pop-up เนื่องจากเป็นแอปทดสอบในระบบ):\n\nคุณสามารถนำ Access Token มาวางเพื่อดำเนินการซิงค์แบบส่วนตัวได้ทันที:");
+    if (inputToken && inputToken.trim()) {
+      const trimmed = inputToken.trim();
+      sessionStorage.setItem('google_sheets_access_token', trimmed);
+      setSheetsConfig(prev => ({ ...prev, accessToken: trimmed }));
+      setManualTokenInput(trimmed);
+      try {
+        await setDoc(doc(db, 'settings', 'sheets'), { accessToken: trimmed }, { merge: true });
+      } catch (err) {
+        console.warn("Failed to auto-save token in settings:", err);
+      }
+      return trimmed;
+    }
+    return null;
+  };
+
+  const handleSaveManualSheetsConfig = async () => {
+    if (!manualSheetInput.trim()) {
+      toast.error("กรุณากรอก Google Sheets Spreadsheet ID หรือ ลิงก์ URL");
+      return;
+    }
+
+    let id = manualSheetInput.trim();
+    // Support parsing Spreadsheet ID from URL
+    const match = id.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (match) {
+      id = match[1];
+    }
+
+    const url = `https://docs.google.com/spreadsheets/d/${id}/edit`;
+    const token = manualTokenInput.trim();
+
+    const newConfig = {
+      spreadsheetId: id,
+      spreadsheetUrl: url,
+      accessToken: token,
+      lastSyncedAt: sheetsConfig.lastSyncedAt || ''
+    };
+
+    try {
+      toast.loading('กำลังบันทึกและเชื่อมข้อมูลตารางเครื่องเขียน...', { id: 'manual-sheets' });
+      await setDoc(doc(db, 'settings', 'sheets'), newConfig, { merge: true });
+      setSheetsConfig(newConfig);
+      toast.success('บันทึกข้อมูลตารางและ Access Token เรียบร้อยแล้ว! สามารถกดใช้ Import / Export ได้เลย', { id: 'manual-sheets' });
+    } catch (err: any) {
+      toast.error(`บันทึกไม่สำเร็จ: ${err.message}`, { id: 'manual-sheets' });
+    }
+  };
+
+  const handleConnectSheets = async () => {
+    setIsConnectingSheets(true);
+    try {
+      const token = await getSheetsToken();
+      if (!token) throw new Error("ยกเลิกการเข้าถึงสิทธิ์ Google Sheets");
+      
+      toast.loading('กำลังเชื่อมโยงและสร้างไฟล์ข้อมูลเครื่องเขียนจำลองบน Google Sheet...', { id: 'sheets-setup' });
+      const response = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          properties: { title: 'Rumah Sekolah (ระบบฐานข้อมูลเครื่องเขียน)' }
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error("เกิดข้อผิดพลาดในการเรียกใช้ Google REST Sheets API");
+      }
+      
+      const sheetData = await response.json();
+      const id = sheetData.spreadsheetId;
+      const url = sheetData.spreadsheetUrl;
+      
+      await ensureSheetsExist(token, id);
+
+      const newConfig = {
+        spreadsheetId: id,
+        spreadsheetUrl: url,
+        accessToken: token,
+        lastSyncedAt: new Date().toLocaleTimeString('th-TH') + ' ' + new Date().toLocaleDateString('th-TH')
+      };
+      
+      await setDoc(doc(db, 'settings', 'sheets'), newConfig, { merge: true });
+      setSheetsConfig(newConfig);
+      
+      toast.success('เชื่อมต่อและตั้งค่าตารางบน Google Sheets สำหรับร้านเรียบร้อย!', { id: 'sheets-setup' });
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`การตั้งค่าล้มเหลว: ${err.message || 'โปรดลองใหม่อีกครั้ง'}`, { id: 'sheets-setup' });
+    } finally {
+      setIsConnectingSheets(false);
+    }
+  };
+
+  const handleExportToSheets = async () => {
+    setIsSyncingExport(true);
+    try {
+      const token = await getSheetsToken();
+      if (!token) throw new Error("กรุณายืนยันสิทธิ์ Google ก่อนส่งออก");
+      
+      const spreadsheetId = sheetsConfig.spreadsheetId;
+      if (!spreadsheetId) throw new Error("ไม่พบข้อมูลคีย์ Google Sheets ในโมดูลความปลอดภัย");
+
+      toast.loading('กำลังตรวจเช็คคอลัมน์และสร้างชีตย่อย...', { id: 'sheets-export' });
+      await ensureSheetsExist(token, spreadsheetId);
+
+      // Raw tables mapping to row matrices
+      const productsVal = [['ID', 'ชื่อสินค้า', 'หมวดหมู่', 'ราคาปกติ', 'ราคาลดพิเศษ', 'จำนวนสต็อก', 'คะแนนเฉลี่ย', 'รีวิวสะสม', 'สต็อกขั้นต่ำแจ้งเตือน', 'รายละเอียดสินค้า']];
+      const prodDocs = await getDocs(collection(db, 'products'));
+      prodDocs.forEach(d => {
+        const item = d.data();
+        productsVal.push([
+          item.id || d.id,
+          item.name || '',
+          item.category || '',
+          String(item.price || 0),
+          String(item.discountPrice || ''),
+          String(item.stock || 0),
+          String(item.rating || 0),
+          String(item.reviews || 0),
+          String(item.lowStockThreshold || ''),
+          item.description || ''
+        ]);
+      });
+
+      const categoriesVal = [['ID', 'ชื่อหมวดหมู่']];
+      const catDocs = await getDocs(collection(db, 'categories'));
+      catDocs.forEach(d => {
+        const item = d.data();
+        categoriesVal.push([item.id || d.id, item.name || '']);
+      });
+
+      const couponsVal = [['ID', 'รหัสคูปอง', 'ประเภทส่วนลด', 'มูลค่าส่วนลด', 'สถานะการทำงาน', 'วันที่สร้างอ้างอิง']];
+      const couponDocs = await getDocs(collection(db, 'coupons'));
+      couponDocs.forEach(d => {
+        const item = d.data();
+        couponsVal.push([
+          item.id || d.id,
+          item.code || '',
+          item.discountType || '',
+          String(item.value || 0),
+          item.isActive ? 'เปิดการใช้งาน' : 'ปิดการใช้งาน',
+          item.createdAt || ''
+        ]);
+      });
+
+      const ordersVal = [['ID', 'ชื่อลูกค้าปลายทาง', 'วิธีการชำระเงิน', 'ราคารวมสุทธิ์', 'สถานะปัจจุบัน', 'วันที่สั่งซื้อ']];
+      const orderDocs = await getDocs(collection(db, 'orders'));
+      orderDocs.forEach(d => {
+        const item = d.data();
+        ordersVal.push([
+          item.id || d.id,
+          item.customerName || item.shippingAddress?.fullName || 'ผู้ใช้นอกระบบ',
+          item.paymentMethod || 'โอนเงินบัญชีกลาง',
+          String(item.totalAmount || 0),
+          item.status || '',
+          item.createdAt || ''
+        ]);
+      });
+
+      const customersVal = [['ID', 'ชื่อลงทะเบียน', 'อีเมลข้อมูล', 'เบอร์ติดต่อ', 'พอยท์แต้มสะสม']];
+      const customerDocs = await getDocs(collection(db, 'users'));
+      customerDocs.forEach(d => {
+        const item = d.data();
+        customersVal.push([
+          item.id || d.id,
+          item.displayName || item.name || '',
+          item.email || '',
+          item.phoneNumber || '',
+          String(item.points || 0)
+        ]);
+      });
+
+      const reviewsVal = [['ID', 'ชื่อสินค้า', 'คะแนนความพึงใจ', 'ความคิดเห็น', 'นามผู้รีวิว', 'วันที่ประเมิน']];
+      const reviewDocs = await getDocs(collection(db, 'reviews'));
+      reviewDocs.forEach(d => {
+        const item = d.data();
+        reviewsVal.push([
+          item.id || d.id,
+          item.productName || item.productId || '',
+          String(item.rating || 0),
+          item.comment || '',
+          item.reviewerName || item.userName || '',
+          item.createdAt || ''
+        ]);
+      });
+
+      toast.loading('กำลังเคลียร์ตารางความจำเก่านอกไดรฟ์...', { id: 'sheets-export' });
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ranges: ['สินค้า!A1:Z1000', 'หมวดหมู่!A1:Z1000', 'คูปอง!A1:Z1000', 'คำสั่งซื้อ!A1:Z1000', 'ลูกค้า!A1:Z1000', 'รีวิว!A1:Z1000']
+        })
+      });
+
+      toast.loading('กำลังส่งบันทึกทับลายแถวทั้งหมด...', { id: 'sheets-export' });
+      const batchUpdateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`;
+      const updateRes = await fetch(batchUpdateUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          valueInputOption: 'USER_ENTERED',
+          data: [
+            { range: 'สินค้า!A1', values: productsVal },
+            { range: 'หมวดหมู่!A1', values: categoriesVal },
+            { range: 'คูปอง!A1', values: couponsVal },
+            { range: 'คำสั่งซื้อ!A1', values: ordersVal },
+            { range: 'ลูกค้า!A1', values: customersVal },
+            { range: 'รีวิว!A1', values: reviewsVal }
+          ]
+        })
+      });
+
+      if (!updateRes.ok) throw new Error("กระบวนการบันทึกทับไม่ได้รับการตอบกลับ");
+
+      const nowStr = new Date().toLocaleTimeString('th-TH') + ' ' + new Date().toLocaleDateString('th-TH');
+      const updatedConfig = {
+        ...sheetsConfig,
+        lastSyncedAt: nowStr
+      };
+      await setDoc(doc(db, 'settings', 'sheets'), updatedConfig, { merge: true });
+      setSheetsConfig(updatedConfig);
+
+      toast.success('ส่งออกรายการฐานข้อมูลไปยัง Google Sheets สำเร็จเรียบร้อย!', { id: 'sheets-export' });
+      fetchDbStats();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`ส่งออกไม่สำเร็จ: ${err.message || 'โปรดตรวจสอบสิทธิ์เชื่อมต่อ'}`, { id: 'sheets-export' });
+    } finally {
+      setIsSyncingExport(false);
+    }
+  };
+
+  const handleImportFromSheets = async () => {
+    setIsSyncingImport(true);
+    try {
+      const token = await getSheetsToken();
+      if (!token) throw new Error("กรุณายืนยันสิทธิ์ Google ก่อนนำเข้าข้อมูล");
+      
+      const spreadsheetId = sheetsConfig.spreadsheetId;
+      if (!spreadsheetId) throw new Error("ไม่มี Google Sheets เชื่อมต่ออยู่ภายในระบบ");
+
+      toast.loading('กำลังอ่านหมวดและแถวข้อมูลจากเครื่องพิมพ์คลาวด์...', { id: 'sheets-import' });
+      const ranges = ['สินค้า!A1:Z1000', 'หมวดหมู่!A1:Z1000', 'คูปอง!A1:Z1000', 'คำสั่งซื้อ!A1:Z1000', 'ลูกค้า!A1:Z1000', 'รีวิว!A1:Z1000'];
+      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?` + ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
+      
+      const response = await fetch(getUrl, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) throw new Error("ข้อมูลตารางขัดแย้งหรือสิทธิ์การนำเข้าล้มเหลว");
+      const resData = await response.json();
+      const valueRanges = resData.valueRanges || [];
+
+      toast.loading('คำนวณและทับบันทึกสัญลักษณ์หมวดเข้าเซิร์ฟของระบบ...', { id: 'sheets-import' });
+
+      // 1. Products
+      const productsRows = valueRanges[0]?.values || [];
+      if (productsRows.length > 1) {
+        const items = productsRows.slice(1).map((row: any) => ({
+          id: row[0] || '',
+          name: row[1] || '',
+          category: row[2] || '',
+          price: Number(row[3]) || 0,
+          discountPrice: row[4] && row[4] !== 'undefined' && row[4] !== '' ? Number(row[4]) : undefined,
+          stock: Number(row[5]) || 0,
+          rating: Number(row[6]) || 4.5,
+          reviews: Number(row[7]) || 0,
+          lowStockThreshold: row[8] && row[8] !== 'undefined' && row[8] !== '' ? Number(row[8]) : undefined,
+          description: row[9] || ''
+        })).filter((item: any) => item.id && item.name);
+
+        await fetch('/api/db/products/overwrite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(items)
+        });
+      }
+
+      // 2. Categories
+      const categoriesRows = valueRanges[1]?.values || [];
+      if (categoriesRows.length > 1) {
+        const items = categoriesRows.slice(1).map((row: any) => ({
+          id: row[0] || '',
+          name: row[1] || ''
+        })).filter((item: any) => item.id && item.name);
+
+        await fetch('/api/db/categories/overwrite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(items)
+        });
+      }
+
+      // 3. Coupons
+      const couponsRows = valueRanges[2]?.values || [];
+      if (couponsRows.length > 1) {
+        const items = couponsRows.slice(1).map((row: any) => ({
+          id: row[0] || '',
+          code: row[1] || '',
+          discountType: row[2] || 'percentage',
+          value: Number(row[3]) || 0,
+          isActive: row[4] === 'เปิดการใช้งาน',
+          createdAt: row[5] || new Date().toISOString()
+        })).filter((item: any) => item.id && item.code);
+
+        await fetch('/api/db/coupons/overwrite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(items)
+        });
+      }
+
+      // 4. Orders
+      const ordersRows = valueRanges[3]?.values || [];
+      if (ordersRows.length > 1) {
+        const items = ordersRows.slice(1).map((row: any) => ({
+          id: row[0] || '',
+          customerName: row[1] || '',
+          paymentMethod: row[2] || '',
+          totalAmount: Number(row[3]) || 0,
+          status: row[4] || 'pending',
+          createdAt: row[5] || new Date().toISOString()
+        })).filter((item: any) => item.id);
+
+        await fetch('/api/db/orders/overwrite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(items)
+        });
+      }
+
+      // 5. Customers
+      const customersRows = valueRanges[4]?.values || [];
+      if (customersRows.length > 1) {
+        const items = customersRows.slice(1).map((row: any) => ({
+          id: row[0] || '',
+          displayName: row[1] || '',
+          email: row[2] || '',
+          phoneNumber: row[3] || '',
+          points: Number(row[4]) || 0
+        })).filter((item: any) => item.id);
+
+        await fetch('/api/db/users/overwrite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(items)
+        });
+      }
+
+      // 6. Reviews
+      const reviewsRows = valueRanges[5]?.values || [];
+      if (reviewsRows.length > 1) {
+        const items = reviewsRows.slice(1).map((row: any) => ({
+          id: row[0] || '',
+          productName: row[1] || '',
+          rating: Number(row[2]) || 5,
+          comment: row[3] || '',
+          reviewerName: row[4] || '',
+          createdAt: row[5] || new Date().toISOString()
+        })).filter((item: any) => item.id);
+
+        await fetch('/api/db/reviews/overwrite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(items)
+        });
+      }
+
+      const nowStr = new Date().toLocaleTimeString('th-TH') + ' ' + new Date().toLocaleDateString('th-TH');
+      const updatedConfig = {
+        ...sheetsConfig,
+        lastSyncedAt: nowStr
+      };
+      await setDoc(doc(db, 'settings', 'sheets'), updatedConfig, { merge: true });
+      setSheetsConfig(updatedConfig);
+
+      toast.success('ดึงและติดตั้งฐานข้อมูลร้านชุดใหม่ล่าสุดจาก Google Sheets สำเร็จ!', { id: 'sheets-import' });
+      fetchDbStats();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`ดึงข้อมูลล้มเหลว: ${err.message || 'โปรดตรวจคอลัมน์แถวชีตอีกครั้ง'}`, { id: 'sheets-import' });
+    } finally {
+      setIsSyncingImport(false);
+    }
+  };
 
   const fetchDbStats = async () => {
     try {
@@ -73,8 +541,23 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (activeTab === 'system') {
       fetchDbStats();
+      fetchSheetsConfig();
     }
   }, [activeTab]);
+
+  const getSafeItemsArray = (items: any): any[] => {
+    if (!items) return [];
+    if (Array.isArray(items)) return items;
+    if (typeof items === 'string') {
+      try {
+        const parsed = JSON.parse(items);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.warn("Failed to parse items string:", e);
+      }
+    }
+    return [];
+  };
 
   const formatDate = (date: any, includeTime: boolean = false) => {
     if (!date) return 'N/A';
@@ -173,7 +656,7 @@ const AdminDashboard = () => {
     facebookLink: 'https://www.facebook.com/rumahsekolahsaya?_rdc=1&_rdr#',
     instagramLink: 'https://www.instagram.com/ismael_charu/',
     youtubeLink: 'https://www.youtube.com/@Rumah-Sekolah',
-    adminEmails: ['ismael.charu2025@gmail.com', 'ismael.charu2018@gmail.com'],
+    adminEmails: ['ismael.charu2015@gmail.com', 'ismael.charu2025@gmail.com', 'ismael.charu2018@gmail.com', 'admin@rumahsekolah.com'],
     tierRules: {
       silver: { minSpending: 0, months: 0 },
       gold: { minSpending: 12000, months: 12 },
@@ -192,7 +675,8 @@ const AdminDashboard = () => {
     topProducts: [] as any[]
   });
 
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(!auth.currentUser);
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -210,7 +694,7 @@ const AdminDashboard = () => {
     lowStock: 0
   });
   
-  const defaultAdminEmails = ['ismael.charu2025@gmail.com', 'ismael.charu2018@gmail.com', 'admin@rumahsekolah.com'];
+  const defaultAdminEmails = ['ismael.charu2015@gmail.com', 'ismael.charu2025@gmail.com', 'ismael.charu2018@gmail.com', 'admin@rumahsekolah.com'];
   const allowedAdmins = shopSettings?.adminEmails?.length > 0 ? shopSettings.adminEmails : defaultAdminEmails;
   const isFirebaseAdmin = auth.currentUser && (
     allowedAdmins.includes(auth.currentUser.email || '') || 
@@ -232,6 +716,28 @@ const AdminDashboard = () => {
     }
   }, [isFirebaseAdmin, loading, dbStats.products]);
 
+  // Load Settings independently on mount
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'shop'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setShopSettings((prev: any) => ({
+          ...prev,
+          ...data,
+          tierRules: {
+            ...prev.tierRules,
+            ...(data.tierRules || {})
+          }
+        }));
+      }
+      setSettingsLoading(false);
+    }, (err) => {
+      console.warn("Failed to fetch shop settings:", err);
+      setSettingsLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
@@ -246,12 +752,12 @@ const AdminDashboard = () => {
   }, [navigate]);
 
   useEffect(() => {
-    if (!authLoading && auth.currentUser) {
+    if (!authLoading && !settingsLoading && auth.currentUser) {
       if (!isFirebaseAdmin) {
         navigate('/admin/login');
       }
     }
-  }, [authLoading, isFirebaseAdmin, navigate]);
+  }, [authLoading, settingsLoading, isFirebaseAdmin, navigate]);
 
   const fetchRealStats = async () => {
     if (!isFirebaseAdmin) return;
@@ -425,21 +931,6 @@ const AdminDashboard = () => {
 
     setLoading(true);
 
-    // Listen to Settings
-    const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'shop'), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        setShopSettings((prev: any) => ({
-          ...prev,
-          ...data,
-          tierRules: {
-            ...prev.tierRules,
-            ...(data.tierRules || {})
-          }
-        }));
-      }
-    }, (err) => handleFirestoreError(err, OperationType.GET, 'settings/shop'));
-
     // Listen to Visitor Stats
     const unsubscribeVisitors = onSnapshot(doc(db, 'stats', 'visitors'), (doc) => {
       if (doc.exists()) setVisitorCount(doc.data().count || 0);
@@ -502,7 +993,6 @@ const AdminDashboard = () => {
     }, (err) => handleFirestoreError(err, OperationType.GET, 'products/counts'));
 
     return () => {
-      unsubscribeSettings();
       unsubscribeVisitors();
       unsubscribeCategories();
       unsubscribeOrders();
@@ -1541,10 +2031,47 @@ const AdminDashboard = () => {
     (searchTerm.toLowerCase() === 'stock<5' && (product.stock || 0) < 5)
   );
 
-  if (authLoading) {
+  if (authLoading || settingsLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full"></div>
+      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6 animate-pulse">
+        {/* Header Skeleton */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gray-200 rounded-xl" />
+            <div className="space-y-2">
+              <div className="h-6 bg-gray-200 rounded w-48" />
+              <div className="h-4 bg-gray-200 rounded w-64" />
+            </div>
+          </div>
+        </div>
+
+        {/* Sidebar Layout Skeleton */}
+        <div className="flex flex-col lg:flex-row gap-8 items-start">
+          {/* Left Sidebar Navigation Skeleton */}
+          <aside className="w-full lg:w-72 flex-shrink-0">
+            <div className="bg-white rounded-3xl border border-gray-100 p-3 space-y-2">
+              <div className="px-4 py-3 border-b border-gray-50">
+                <div className="h-3 bg-gray-200 rounded w-24 mb-1" />
+              </div>
+              {Array.from({ length: 11 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-2xl">
+                  <div className="w-8 h-8 rounded-xl bg-gray-100" />
+                  <div className="h-4 bg-gray-150 rounded w-28" />
+                </div>
+              ))}
+            </div>
+          </aside>
+
+          {/* Main Content Area Skeleton */}
+          <div className="flex-1 w-full space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="bg-white rounded-3xl border border-gray-50 p-5 h-24" />
+              ))}
+            </div>
+            <div className="bg-white rounded-3xl border border-gray-50 p-6 h-96" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -1777,7 +2304,7 @@ const AdminDashboard = () => {
                         </td>
                         <td className="px-4 py-4">
                           <div className="space-y-0.5">
-                            {order.items.map((item: any, idx: number) => (
+                            {getSafeItemsArray(order.items).map((item: any, idx: number) => (
                               <p key={idx} className="text-xs text-gray-600 font-medium">
                                 • {item.name} <span className="text-gray-400">x{item.quantity}</span>
                               </p>
@@ -1878,7 +2405,7 @@ const AdminDashboard = () => {
                                 <Eye size={16} />
                               </button>
                             )}
-                            {order.items.map((item: any, idx: number) => (
+                            {getSafeItemsArray(order.items).map((item: any, idx: number) => (
                               <p key={idx} className="text-xs text-gray-600 font-medium">
                                 • {item.name} <span className="text-gray-400">x{item.quantity}</span>
                               </p>
@@ -3969,6 +4496,90 @@ const AdminDashboard = () => {
                     <p className="text-[9px] font-black uppercase text-orange-600 bg-white/50 px-2 py-1 rounded inline-block">สถานะปัจจุบัน: ปกติ</p>
                   </div>
                 </div>
+
+                {/* Google Sheets Database Synchronization Console */}
+                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-green-50 text-green-600 rounded-xl flex items-center justify-center">
+                      <Globe size={18} />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-xs text-gray-900 leading-tight">ระบบฐานข้อมูล Google Sheets</h3>
+                      <p className="text-[9px] text-gray-400 font-medium leading-none mt-1">สำรอง & จัดการตารางข้อมูลสด</p>
+                    </div>
+                  </div>
+
+                  <hr className="border-gray-50" />
+
+                  {sheetsConfig.spreadsheetId ? (
+                    <div className="space-y-4">
+                      <div className="p-3 bg-green-50 border border-green-100 rounded-xl space-y-1">
+                        <p className="text-[10px] font-bold text-green-800">เชื่อมต่อคลาวด์ชีตแล้ว</p>
+                        <p className="text-[9px] text-green-700 font-mono truncate">{sheetsConfig.spreadsheetId}</p>
+                        {sheetsConfig.lastSyncedAt && (
+                          <p className="text-[8px] text-gray-400 font-medium pt-1">ซิงค์ล่าสุดเมื่อ: {sheetsConfig.lastSyncedAt}</p>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <a 
+                          href={sheetsConfig.spreadsheetUrl} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="flex items-center justify-center gap-2 w-full py-2 bg-emerald-50 text-emerald-700 rounded-xl text-[10px] font-bold hover:bg-emerald-100 transition-all text-center block"
+                        >
+                          เปิดไฟล์ Google Sheets <ArrowRight size={12} />
+                        </a>
+
+                        <button 
+                          onClick={handleExportToSheets}
+                          disabled={isSyncingExport || isSyncingImport}
+                          className="flex items-center justify-center gap-2 w-full py-2 bg-gray-950 text-white rounded-xl text-[10px] font-bold hover:bg-gray-900 transition-all disabled:opacity-50"
+                        >
+                          {isSyncingExport ? (
+                            <div className="flex items-center gap-1.5">
+                              <Loader2 size={12} className="animate-spin" /> กำลังส่งออกไปชีต...
+                            </div>
+                          ) : 'บันทึกทับขึ้น Google Sheets (Export)'}
+                        </button>
+
+                        <button 
+                          onClick={handleImportFromSheets}
+                          disabled={isSyncingExport || isSyncingImport}
+                          className="flex items-center justify-center gap-2 w-full py-2 bg-white border border-gray-200 text-gray-700 rounded-xl text-[10px] font-bold hover:bg-gray-50 transition-all disabled:opacity-50"
+                        >
+                          {isSyncingImport ? (
+                            <div className="flex items-center gap-1.5">
+                              <Loader2 size={12} className="animate-spin" /> กำลังดึงข้อมูลกลับ...
+                            </div>
+                          ) : 'ดึงตรรกะทับเข้าร้านค้า (Import)'}
+                        </button>
+                      </div>
+
+                      <p className="text-[8px] text-gray-400 leading-normal text-center">
+                        *แผ่นชีตจะจำแนกตามแท็บ ได้แก่ <b>สินค้า</b>, <b>หมวดหมู่</b>, <b>คูปอง</b>, <b>ลูกค้า</b>, <b>คำสั่งซื้อ</b> และ <b>รีวิว</b>
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 text-center py-2">
+                      <p className="text-[10px] text-gray-500 leading-relaxed font-medium">
+                        คุณยังไม่ได้ทำการตั้งค่าเชื่อมต่อสเปรดชีต คุณสามารถสร้าง Google Sheets ใหม่ประจำร้านเพื่อใช้บริหารแถวตารางข้อมูลได้ทันที!
+                      </p>
+                      
+                      <button 
+                        onClick={handleConnectSheets}
+                        disabled={isConnectingSheets}
+                        className="flex items-center justify-center gap-2 w-full py-2.5 bg-green-600 text-white rounded-xl text-[10px] font-bold hover:bg-green-700 transition-all disabled:opacity-50"
+                      >
+                        {isConnectingSheets ? (
+                          <div className="flex items-center gap-1.5">
+                            <Loader2 size={12} className="animate-spin" /> กำลังสร้างคลาวด์ชีต...
+                          </div>
+                        ) : 'เปิดสิทธิ์ Google Sheets และสร้างไฟล์'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -4708,7 +5319,7 @@ const AdminDashboard = () => {
                   <div className="bg-gray-50 p-6 rounded-2xl space-y-4">
                     <p className="text-xs font-black text-gray-400 uppercase tracking-widest">รายการสินค้า (Items)</p>
                     <div className="space-y-2">
-                      {selectedLabelData.items.map((item: any, idx: number) => (
+                      {getSafeItemsArray(selectedLabelData.items).map((item: any, idx: number) => (
                         <div key={idx} className="flex justify-between text-sm">
                           <span className="text-gray-700 font-medium">• {item.name}</span>
                           <span className="font-bold text-gray-900">x{item.quantity}</span>

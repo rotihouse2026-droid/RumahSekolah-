@@ -14,6 +14,8 @@ interface CartContextType {
   settings: ShopSettings | null;
   loadingSettings: boolean;
   categories: any[];
+  productsCache: any[];
+  setProductsCache: React.Dispatch<React.SetStateAction<any[]>>;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -51,6 +53,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [settings, setSettings] = useState<ShopSettings | null>(null);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [categories, setCategories] = useState<any[]>([]);
+  const [productsCache, setProductsCache] = useState<any[]>([]);
 
   // Sync cart to local storage
   useEffect(() => {
@@ -165,7 +168,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       totalPrice,
       settings,
       loadingSettings,
-      categories
+      categories,
+      productsCache,
+      setProductsCache
     }}>
       {children}
     </CartContext.Provider>

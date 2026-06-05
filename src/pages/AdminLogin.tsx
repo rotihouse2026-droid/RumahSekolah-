@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, ShieldAlert, LogIn, Eye, EyeOff } from 'lucide-react';
 import { auth, db } from '../firebase';
-import { signInWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { signInWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail, signInWithCustomToken } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../utils/firebaseErrors';
 
@@ -15,7 +15,7 @@ const AdminLogin = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const defaultAdminEmails = ['ismael.charu2025@gmail.com', 'ismael.charu2018@gmail.com', 'admin@rumahsekolah.com'];
+  const defaultAdminEmails = ['ismael.charu2015@gmail.com', 'ismael.charu2025@gmail.com', 'ismael.charu2018@gmail.com', 'admin@rumahsekolah.com'];
 
   useEffect(() => {
     const checkAdmin = async () => {
@@ -78,29 +78,6 @@ const AdminLogin = () => {
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const allowedAdmins = await getAdminEmails();
-      
-      if (allowedAdmins.includes(result.user.email || '') || allowedAdmins.includes(result.user.phoneNumber || '') || result.user.uid === 'HIsfiO4Vh6MTUYT6QZToCWjqpHn1') {
-        localStorage.setItem('rumahsekolah_admin_ui_auth', 'true');
-        navigate('/admin/dashboard');
-      } else {
-        await auth.signOut();
-        setError('อีเมล Google นี้ไม่มีสิทธิ์เข้าถึงระบบผู้ดูแลระบบ');
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError('การเข้าสู่ระบบผ่าน Google ล้มเหลว: ' + (err.message || 'โปรดลองอีกครั้ง'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -108,7 +85,27 @@ const AdminLogin = () => {
     setErrorCode('');
 
     try {
-      const result = await signInWithEmailAndPassword(auth, email, password);
+      // Call Express proxy API to handle login securely on the server
+      const response = await fetch('/api/auth/login-register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          isRegister: false,
+        }),
+      });
+
+      const resData = await response.json();
+
+      if (!response.ok || !resData.success) {
+        throw new Error(resData.error || 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      }
+
+      // Use modern Firebase SDK to sign in using Custom Token
+      const result = await signInWithCustomToken(auth, resData.customToken);
       const allowedAdmins = await getAdminEmails();
       
       if (allowedAdmins.includes(result.user.email || '') || allowedAdmins.includes(result.user.phoneNumber || '') || result.user.uid === 'HIsfiO4Vh6MTUYT6QZToCWjqpHn1') {
@@ -122,7 +119,7 @@ const AdminLogin = () => {
       console.error(err);
       setErrorCode(err.code || '');
       if (err.code === 'auth/operation-not-allowed') {
-        setError('ระบบยังไม่เปิดใช้งานการเข้าสู่ระบบด้วยอีเมลใน Firebase Console');
+        setError('ไม่สามารถเข้าสู่ระบบด้วยอีเมลได้ เนื่องจากโปรเจกต์ไม่ได้เปิดใช้งานระบบ "อีเมล/รหัสผ่าน" ใน Firebase Console / กรุณาเข้าสู่ระบบด้วยปุ่ม Google หรือให้แอดมินเปิดใช้งานด้วยขั้นตอนด่วนด้านล่างครับ');
       } else if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
         setError('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
       } else if (err.code === 'auth/invalid-email') {
@@ -154,29 +151,6 @@ const AdminLogin = () => {
               <ShieldAlert size={18} />
               <div>{error}</div>
             </div>
-          </div>
-        )}
-
-        {errorCode === 'auth/operation-not-allowed' && (
-          <div className="bg-orange-50 border border-orange-200 text-orange-800 p-5 rounded-2xl text-xs space-y-3 shadow-sm">
-            <p className="font-bold text-orange-950 flex items-center gap-1.5">💡 สำหรับผู้ดูแลระบบ / แอดมิน:</p>
-            <p className="text-slate-700 leading-relaxed">
-              Firebase Authentication เพิ่งได้รับการติดตั้งใหม่ คุณจำเป็นต้องเข้าไปเปิดใช้งานการเข้าสู่ระบบแบบ <b>Email/Password</b> ใน Firebase Console ก่อนจึงจะใช้งานล็อกอินแอดมินหรือสมัครสมาชิกได้:
-            </p>
-            <ol className="list-decimal list-inside space-y-1.5 ml-1 font-normal text-slate-700">
-              <li>ไปที่เมนู <b>Authentication</b> ใน Firebase Console</li>
-              <li>คลิกแท็บ <b>Sign-in method</b></li>
-              <li>คลิกปุ่ม <b>Add new provider</b> แล้วเลือก <b>Email/Password</b></li>
-              <li>สลับสวิตช์เป็น <b>Enable</b> และกดบันทึก (Save)</li>
-            </ol>
-            <a 
-              href="https://console.firebase.google.com/project/green-ethos-50bnn/authentication/providers"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block w-full text-center bg-orange-500 hover:bg-orange-600 active:scale-95 text-white font-bold py-3 px-4 rounded-xl transition-all font-sans"
-            >
-              ไปที่หน้าตั้งค่า Firebase Auth ↗
-            </a>
           </div>
         )}
 
@@ -250,27 +224,6 @@ const AdminLogin = () => {
               )}
             </button>
           </form>
-
-          <div className="relative flex py-2 items-center">
-            <div className="flex-grow border-t border-gray-100"></div>
-            <span className="flex-shrink mx-4 text-gray-400 text-xs uppercase font-semibold">หรือ</span>
-            <div className="flex-grow border-t border-gray-100"></div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 py-4 rounded-2xl font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
-          >
-            <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.9h6.6c-.28 1.5-.1.14-.1.1a4.514 4.514 0 01-5.07 3.51V20h5.07c2.97-2.74 4.67-6.78 4.67-11.64z" />
-              <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-5.07-3.93c-1.4.94-3.19 1.5-5.07 1.5-3.89 0-7.18-2.63-8.36-6.17H1.13v4.06C3.11 20.11 7.21 24 12 24z" />
-              <path fill="#FBBC05" d="M3.64 12.5a7.143 7.143 0 010-4.43V4.01H1.13a11.94 11.94 0 000 12.55l2.51-4.06z" />
-              <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.43-3.43C17.93 1.19 15.24 0 12 0 7.21 0 3.11 3.89 1.13 7.94l2.51 4.06c1.18-3.54 4.47-6.17 8.36-6.17z" />
-            </svg>
-            เข้าสู่ระบบแอดมินด้วย Google
-          </button>
         </div>
       </div>
     </div>

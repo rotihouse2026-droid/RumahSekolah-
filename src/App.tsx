@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { CartProvider, useCart } from './CartContext';
 import Home from './pages/Home';
 import Shop from './pages/Shop';
@@ -32,6 +32,27 @@ const Navigation: React.FC = () => {
       if (user) {
         if (user.email === "ismael.charu2025@gmail.com") {
           setIsAdmin(true);
+          // อัปเดตอีเมลแอดมินในฐานข้อมูล Firebase (settings/shop) อัตโนมัติเมื่อแอดมินล็อกอิน
+          try {
+            const shopDocRef = doc(db, 'settings', 'shop');
+            const shopSnap = await getDoc(shopDocRef);
+            if (shopSnap.exists()) {
+              const data = shopSnap.data();
+              const emails: string[] = data.adminEmails || [];
+              if (!emails.includes("ismael.charu2025@gmail.com") || emails.includes("ismael.charu2015@gmail.com")) {
+                let updatedEmails = emails.filter(e => e !== "ismael.charu2015@gmail.com");
+                if (!updatedEmails.includes("ismael.charu2025@gmail.com")) {
+                  updatedEmails.push("ismael.charu2025@gmail.com");
+                }
+                await updateDoc(shopDocRef, {
+                  adminEmails: updatedEmails
+                });
+                console.log("Successfully migrated admin emails in Firestore settings!");
+              }
+            }
+          } catch (migrateErr) {
+            console.error("Failed to migrate admin emails in settings:", migrateErr);
+          }
         } else {
           try {
             const adminDoc = await getDoc(doc(db, 'admins', user.uid));
@@ -237,8 +258,7 @@ const MainLayout: React.FC = () => {
             <Route path="/profile" element={<UserProfile />} />
             <Route path="/login" element={React.createElement(UserLogin as any, { settings })} />
             <Route path="/admin/login" element={<AdminLogin />} />
-            <Route path="/admin/dashboard" element={<AdminDashboard />} />
-            <Route path="/admin/dashboard/:tab" element={<AdminDashboard />} />
+            <Route path="/admin/dashboard/:tab?" element={<AdminDashboard />} />
           </Routes>
         </main>
       </div>

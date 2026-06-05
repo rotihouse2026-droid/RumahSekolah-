@@ -181,25 +181,8 @@ const ProductDetail = ({ settings }: { settings: any }) => {
     fetchProduct();
   }, [id]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full"></div>
-      </div>
-    );
-  }
-
-  if (!product) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
-        <h2 className="text-2xl font-bold text-gray-900">ไม่พบสินค้า</h2>
-        <Link to="/shop" className="mt-4 text-orange-600 font-bold inline-block">กลับไปที่ร้านค้า</Link>
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+    <div className="max-w-7xl mx-auto px-4 py-8 space-y-8 animate-fade-in">
       <button 
         onClick={() => navigate(-1)}
         className="flex items-center gap-1.5 text-gray-500 hover:text-orange-600 transition-colors font-medium text-sm"
@@ -207,7 +190,51 @@ const ProductDetail = ({ settings }: { settings: any }) => {
         <ArrowLeft size={16} /> กลับ
       </button>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      {loading ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-pulse">
+          {/* Image Gallery Skeleton */}
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-gray-100 aspect-square w-full" />
+            <div className="grid grid-cols-5 gap-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="aspect-square bg-gray-100 rounded-lg" />
+              ))}
+            </div>
+          </div>
+
+          {/* Details Skeleton */}
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <div className="h-4 bg-gray-200 rounded-lg w-1/4" />
+              <div className="h-8 bg-gray-200 rounded-lg w-3/4" />
+              <div className="h-4 bg-gray-200 rounded-lg w-1/3" />
+            </div>
+
+            <div className="p-4 bg-gray-100 rounded-2xl space-y-3">
+              <div className="h-6 bg-gray-200 rounded-lg w-1/2" />
+              <div className="h-4 bg-gray-200 rounded-lg w-1/4" />
+            </div>
+
+            <div className="space-y-2">
+              <div className="h-4 bg-gray-200 rounded-lg w-full" />
+              <div className="h-4 bg-gray-200 rounded-lg w-full" />
+              <div className="h-4 bg-gray-200 rounded-lg w-2/3" />
+            </div>
+
+            <div className="flex gap-4 pt-4">
+              <div className="h-12 bg-gray-200 rounded-2xl w-1/2" />
+              <div className="h-12 bg-gray-200 rounded-2xl w-1/2" />
+            </div>
+          </div>
+        </div>
+      ) : !product ? (
+        <div className="max-w-7xl mx-auto px-4 py-20 text-center">
+          <h2 className="text-2xl font-bold text-gray-900">ไม่พบสินค้า</h2>
+          <Link to="/shop" className="mt-4 text-orange-600 font-bold inline-block">กลับไปที่ร้านค้า</Link>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Image Gallery */}
         <div className="space-y-3">
           <motion.div 
@@ -563,6 +590,8 @@ const ProductDetail = ({ settings }: { settings: any }) => {
         </div>
       </section>
 
+        </>
+      )}
     </div>
   );
 };
