@@ -136,6 +136,138 @@ function resolveSentinelFields(data: any, existingData?: any) {
 }
 
 // Fetch helper to perform AJAX mutations reliably
+import { PRODUCTS } from "./data/mockProducts";
+
+let useLocalStorageFallback = false;
+
+function getLocalStorageDb() {
+  const dbStr = localStorage.getItem('rumahsekolah_local_db');
+  if (!dbStr) {
+    const initialDb = {
+      products: PRODUCTS || [],
+      categories: [
+        { id: "cat-1", name: "ปากกาและเครื่องเขียน" },
+        { id: "cat-2", name: "สมุดและกระดาษ" },
+        { id: "cat-3", name: "อุปกรณ์ศิลปะ" },
+        { id: "cat-4", name: "กระเป๋าและกล่องดินสอ" },
+        { id: "cat-5", name: "อุปกรณ์" }
+      ],
+      coupons: [
+        { id: "coupon-1", code: "WELCOME10", discountType: "percentage", value: 10, isActive: true, createdAt: new Date().toISOString() },
+        { id: "coupon-2", code: "FREE30", discountType: "fixed", value: 30, isActive: true, createdAt: new Date().toISOString() }
+      ],
+      settings: {
+        shop: {
+          name: "Rumah Sekolah",
+          description: "ร้านจำหน่ายเครื่องเขียนและอุปกรณ์ศิลปะเกรดพรีเมียม",
+          logoUrl: "https://images.unsplash.com/photo-1542435503-956c469947f6?auto=format&fit=crop&q=80&w=800"
+        },
+        sheets: {
+          spreadsheetId: "",
+          spreadsheetUrl: "",
+          lastSyncedAt: ""
+        }
+      },
+      orders: [],
+      users: [],
+      slips: [],
+      pointTransactions: [],
+      contacts: [],
+      reviews: [],
+      notifications: [],
+      users_auth_secure: {}
+    };
+    localStorage.setItem('rumahsekolah_local_db', JSON.stringify(initialDb));
+    return initialDb;
+  }
+  try {
+    return JSON.parse(dbStr);
+  } catch (e) {
+    return {
+      products: PRODUCTS || [],
+      categories: [],
+      coupons: [],
+      settings: {},
+      orders: [],
+      users: [],
+      slips: [],
+      users_auth_secure: {}
+    };
+  }
+}
+
+function saveLocalStorageDb(db: any) {
+  try {
+    localStorage.setItem('rumahsekolah_local_db', JSON.stringify(db));
+  } catch (e) {
+    console.error("Local DB: Failed to save:", e);
+  }
+}
+
+function getLocalCollection(collectionName: string): any[] {
+  const db = getLocalStorageDb();
+  if (collectionName === "settings") {
+    const settings = db.settings || {};
+    return Object.keys(settings).map(key => ({
+      id: key,
+      ...settings[key]
+    }));
+  }
+  return db[collectionName] || [];
+}
+
+function getLocalDocument(collectionName: string, id: string): any | null {
+  const col = getLocalCollection(collectionName);
+  return col.find((doc: any) => doc.id === id) || null;
+}
+
+function saveLocalDocument(collectionName: string, id: string, data: any): any {
+  const db = getLocalStorageDb();
+  if (collectionName === "settings") {
+    if (!db.settings) db.settings = {};
+    db.settings[id] = { ...db.settings[id], ...data, id };
+    saveLocalStorageDb(db);
+    return db.settings[id];
+  }
+  if (!db[collectionName]) db[collectionName] = [];
+  
+  const index = db[collectionName].findIndex((doc: any) => doc.id === id);
+  const now = new Date().toISOString();
+  const newDoc = {
+    id,
+    ...data,
+    updatedAt: now,
+    createdAt: index >= 0 ? (db[collectionName][index].createdAt || now) : now
+  };
+  if (index >= 0) {
+    db[collectionName][index] = { ...db[collectionName][index], ...newDoc };
+  } else {
+    db[collectionName].push(newDoc);
+  }
+  saveLocalStorageDb(db);
+  return newDoc;
+}
+
+function deleteLocalDocument(collectionName: string, id: string): boolean {
+  const db = getLocalStorageDb();
+  if (collectionName === "settings") {
+    if (db.settings && db.settings[id]) {
+      delete db.settings[id];
+      saveLocalStorageDb(db);
+      return true;
+    }
+    return false;
+  }
+  if (!db[collectionName]) return false;
+  const initialLength = db[collectionName].length;
+  db[collectionName] = db[collectionName].filter((doc: any) => doc.id !== id);
+  const deleted = db[collectionName].length < initialLength;
+  if (deleted) {
+    saveLocalStorageDb(db);
+  }
+  return deleted;
+}
+
 async function apiCall(method: string, url: string, body?: any) {
   try {
     const options: RequestInit = { method };
@@ -155,16 +287,39 @@ async function apiCall(method: string, url: string, body?: any) {
 }
 
 export async function getDoc(docRef: MockDocumentReference): Promise<MockDocumentSnapshot> {
+  if (useLocalStorageFallback) {
+    const val = getLocalDocument(docRef.collectionPath, docRef.id);
+    return new MockDocumentSnapshot(docRef.id, val);
+  }
+
   const url = `/api/db/${docRef.collectionPath}/${docRef.id}`;
   try {
     const res = await fetch(url);
+    const contentType = res.headers.get("content-type");
+    if (res.status === 404 && (!contentType || !contentType.includes("application/json"))) {
+      useLocalStorageFallback = true;
+      console.warn("[DB Fallback] API returned 404 HTML/Non-JSON. Switching to client-side LocalStorage DB.");
+      const val = getLocalDocument(docRef.collectionPath, docRef.id);
+      return new MockDocumentSnapshot(docRef.id, val);
+    }
     if (res.status === 404) {
       return new MockDocumentSnapshot(docRef.id, null);
     }
-    const data = await res.json();
-    return new MockDocumentSnapshot(docRef.id, data);
+    const txt = await res.text();
+    try {
+      const data = JSON.parse(txt);
+      return new MockDocumentSnapshot(docRef.id, data);
+    } catch {
+      useLocalStorageFallback = true;
+      console.warn("[DB Fallback] API did not return valid JSON. Switching to client-side LocalStorage DB.");
+      const val = getLocalDocument(docRef.collectionPath, docRef.id);
+      return new MockDocumentSnapshot(docRef.id, val);
+    }
   } catch (err) {
-    return new MockDocumentSnapshot(docRef.id, null);
+    useLocalStorageFallback = true;
+    console.warn("[DB Fallback] Failed to fetch. Switching to client-side LocalStorage DB.", err);
+    const val = getLocalDocument(docRef.collectionPath, docRef.id);
+    return new MockDocumentSnapshot(docRef.id, val);
   }
 }
 
@@ -172,15 +327,36 @@ export async function getDocs(queryRef: MockQuery | MockCollectionReference): Pr
   const collectionPath = queryRef.type === "collection" ? (queryRef as MockCollectionReference).path : (queryRef as MockQuery).collectionPath;
   const constraints = queryRef.type === "query" ? (queryRef as MockQuery).constraints : [];
 
-  const url = `/api/db/${collectionPath}`;
   let docs: any[] = [];
-  try {
-    const res = await fetch(url);
-    if (res.ok) {
-      docs = await res.json();
+  
+  if (useLocalStorageFallback) {
+    docs = getLocalCollection(collectionPath);
+  } else {
+    const url = `/api/db/${collectionPath}`;
+    try {
+      const res = await fetch(url);
+      const contentType = res.headers.get("content-type");
+      if (!res.ok && (!contentType || !contentType.includes("application/json"))) {
+        useLocalStorageFallback = true;
+        console.warn("[DB Fallback] API returned 404/Non-JSON. Switching to LocalStorage.");
+        docs = getLocalCollection(collectionPath);
+      } else if (res.ok) {
+        const txt = await res.text();
+        try {
+          docs = JSON.parse(txt);
+        } catch {
+          useLocalStorageFallback = true;
+          console.warn("[DB Fallback] Invalid JSON returned. Switched to LocalStorage.");
+          docs = getLocalCollection(collectionPath);
+        }
+      } else {
+        docs = [];
+      }
+    } catch (err) {
+      useLocalStorageFallback = true;
+      console.warn("[DB Fallback] Fetch failed. Switched to LocalStorage.", err);
+      docs = getLocalCollection(collectionPath);
     }
-  } catch (err) {
-    console.error("Failed to fetch documents for:", collectionPath, err);
   }
 
   // Handle client-side querying logic dynamically to guarantee 100% correctness
@@ -227,13 +403,41 @@ export async function setDoc(docRef: MockDocumentReference, data: any, options?:
     finalData = { ...existing, ...data };
   }
   const resolved = resolveSentinelFields(finalData);
-  return await apiCall("PUT", `/api/db/${docRef.collectionPath}/${docRef.id}`, resolved);
+
+  if (useLocalStorageFallback) {
+    saveLocalDocument(docRef.collectionPath, docRef.id, resolved);
+    return resolved;
+  }
+
+  try {
+    return await apiCall("PUT", `/api/db/${docRef.collectionPath}/${docRef.id}`, resolved);
+  } catch (err) {
+    useLocalStorageFallback = true;
+    console.warn("[DB Fallback] API setDoc failed. Saved to LocalStorage instead.", err);
+    saveLocalDocument(docRef.collectionPath, docRef.id, resolved);
+    return resolved;
+  }
 }
 
 export async function addDoc(collectionRef: MockCollectionReference, data: any): Promise<MockDocumentReference> {
   const resolved = resolveSentinelFields(data);
-  const result = await apiCall("POST", `/api/db/${collectionRef.path}`, resolved);
-  return new MockDocumentReference(collectionRef.path, result.id);
+  const id = resolved.id || `doc-${Math.random().toString(36).substr(2, 9)}`;
+  const finalData = { ...resolved, id };
+
+  if (useLocalStorageFallback) {
+    saveLocalDocument(collectionRef.path, id, finalData);
+    return new MockDocumentReference(collectionRef.path, id);
+  }
+
+  try {
+    const result = await apiCall("POST", `/api/db/${collectionRef.path}`, finalData);
+    return new MockDocumentReference(collectionRef.path, result.id || id);
+  } catch (err) {
+    useLocalStorageFallback = true;
+    console.warn("[DB Fallback] API addDoc failed. Saved to LocalStorage instead.", err);
+    saveLocalDocument(collectionRef.path, id, finalData);
+    return new MockDocumentReference(collectionRef.path, id);
+  }
 }
 
 export async function updateDoc(docRef: MockDocumentReference, data: any) {
@@ -241,7 +445,20 @@ export async function updateDoc(docRef: MockDocumentReference, data: any) {
   const existing = currentSnap.exists() ? currentSnap.data() : {};
   const finalData = { ...existing, ...data };
   const resolved = resolveSentinelFields(finalData);
-  return await apiCall("PUT", `/api/db/${docRef.collectionPath}/${docRef.id}`, resolved);
+
+  if (useLocalStorageFallback) {
+    saveLocalDocument(docRef.collectionPath, docRef.id, resolved);
+    return resolved;
+  }
+
+  try {
+    return await apiCall("PUT", `/api/db/${docRef.collectionPath}/${docRef.id}`, resolved);
+  } catch (err) {
+    useLocalStorageFallback = true;
+    console.warn("[DB Fallback] API updateDoc failed. Saved to LocalStorage instead.", err);
+    saveLocalDocument(docRef.collectionPath, docRef.id, resolved);
+    return resolved;
+  }
 }
 
 export class MockBatch {
@@ -280,7 +497,19 @@ export function writeBatch() {
 }
 
 export async function deleteDoc(docRef: MockDocumentReference) {
-  return await apiCall("DELETE", `/api/db/${docRef.collectionPath}/${docRef.id}`);
+  if (useLocalStorageFallback) {
+    const success = deleteLocalDocument(docRef.collectionPath, docRef.id);
+    return { success };
+  }
+
+  try {
+    return await apiCall("DELETE", `/api/db/${docRef.collectionPath}/${docRef.id}`);
+  } catch (err) {
+    useLocalStorageFallback = true;
+    console.warn("[DB Fallback] API deleteDoc failed. Deleted from LocalStorage instead.", err);
+    const success = deleteLocalDocument(docRef.collectionPath, docRef.id);
+    return { success };
+  }
 }
 
 export async function getAggregateFromServer(queryRef: any, spec: any) {
