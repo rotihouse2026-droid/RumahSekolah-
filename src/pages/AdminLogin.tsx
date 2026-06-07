@@ -85,27 +85,8 @@ const AdminLogin = () => {
     setErrorCode('');
 
     try {
-      // Call Express proxy API to handle login securely on the server
-      const response = await fetch('/api/auth/login-register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          password,
-          isRegister: false,
-        }),
-      });
-
-      const resData = await response.json();
-
-      if (!response.ok || !resData.success) {
-        throw new Error(resData.error || 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
-      }
-
-      // Use modern Firebase SDK to sign in using Custom Token
-      const result = await signInWithCustomToken(auth, resData.customToken);
+      // Use signInWithEmailAndPassword helper which has built-in client-side LocalStorage DB fallback
+      const result = await signInWithEmailAndPassword(auth, email, password);
       const allowedAdmins = await getAdminEmails();
       
       if (allowedAdmins.includes(result.user.email || '') || allowedAdmins.includes(result.user.phoneNumber || '') || result.user.uid === 'HIsfiO4Vh6MTUYT6QZToCWjqpHn1') {

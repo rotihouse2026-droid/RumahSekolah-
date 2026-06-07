@@ -143,28 +143,18 @@ const UserLogin: React.FC<{ settings: any }> = ({ settings }) => {
         return;
       }
 
-      // Call Express proxy API to handle registration/login securely on the server
-      const response = await fetch('/api/auth/login-register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      // Use helper functions from firebase/auth configured with robust client-side fallback
+      let result;
+      if (isRegister) {
+        result = await (createUserWithEmailAndPassword as any)(
+          auth,
           email,
           password,
-          isRegister,
-          displayName: displayName || email.split('@')[0],
-        }),
-      });
-
-      const resData = await response.json();
-
-      if (!response.ok || !resData.success) {
-        throw new Error(resData.error || 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+          displayName || email.split('@')[0]
+        );
+      } else {
+        result = await signInWithEmailAndPassword(auth, email, password);
       }
-
-      // Use modern Firebase SDK to sign in using Custom Token
-      const result = await signInWithCustomToken(auth, resData.customToken);
       
       // Claim guest points - make it non-blocking to avoid login failure if this fails
       claimGuestPoints(result.user).catch(err => {
