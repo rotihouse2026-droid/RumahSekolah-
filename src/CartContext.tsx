@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { CartItem, ShopSettings, Product } from './types';
 import { db } from './firebase';
-import { doc, getDoc, collection, query, orderBy, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, orderBy, getDocs } from 'firebase/firestore';
 
 interface CartContextType {
   cart: CartItem[];
@@ -60,25 +60,22 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('rumahsekolah_cart', JSON.stringify(cart));
   }, [cart]);
 
-  // Load settings from Firebase
+  // Load settings from Firebase in real-time
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const shopDocRef = doc(db, 'settings', 'shop');
-        const shopSnap = await getDoc(shopDocRef);
-        if (shopSnap.exists()) {
-          setSettings({ ...defaultSettings, ...shopSnap.data() });
-        } else {
-          setSettings(defaultSettings);
-        }
-      } catch (err) {
-        console.error("Failed to load settings:", err);
+    const shopDocRef = doc(db, 'settings', 'shop');
+    const unsub = onSnapshot(shopDocRef, (shopSnap) => {
+      if (shopSnap.exists()) {
+        setSettings({ ...defaultSettings, ...shopSnap.data() as ShopSettings });
+      } else {
         setSettings(defaultSettings);
-      } finally {
-        setLoadingSettings(false);
       }
-    };
-    fetchSettings();
+      setLoadingSettings(false);
+    }, (err) => {
+      console.error("Failed to load settings in real-time:", err);
+      setSettings(defaultSettings);
+      setLoadingSettings(false);
+    });
+    return unsub;
   }, []);
 
   // Load categories from Firebase

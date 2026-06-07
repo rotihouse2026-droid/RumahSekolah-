@@ -30,70 +30,84 @@ const Navigation: React.FC = () => {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
-      if (user) {
-        const isDefaultAdmin = [
-          "ismael.charu2015@gmail.com",
-          "ismael.charu2025@gmail.com",
-          "ismael.charu2018@gmail.com",
-          "admin@rumahsekolah.com"
-        ].includes(user.email || '');
-
-        if (isDefaultAdmin) {
-          setIsAdmin(true);
-          // อัปเดตอีเมลแอดมินในฐานข้อมูล Firebase (settings/shop) อัตโนมัติเมื่อแอดมินล็อกอิน
-          try {
-            const shopDocRef = doc(db, 'settings', 'shop');
-            const shopSnap = await getDoc(shopDocRef);
-            if (shopSnap.exists()) {
-              const data = shopSnap.data();
-              let emailsArray: string[] = [];
-              if (Array.isArray(data.adminEmails)) {
-                emailsArray = data.adminEmails;
-              } else if (typeof data.adminEmails === 'string') {
-                emailsArray = (data.adminEmails as string).split(',').map(e => e.trim()).filter(Boolean);
-              }
-
-              // Ensure current admin email is included
-              if (user.email && !emailsArray.includes(user.email)) {
-                emailsArray.push(user.email);
-              }
-
-              // Let's always make sure key admins are included and any unwanted state is resolved
-              const originalLength = Array.isArray(data.adminEmails) ? data.adminEmails.length : -1;
-              const hasMismatch = !Array.isArray(data.adminEmails) || 
-                                  !emailsArray.includes('ismael.charu2015@gmail.com') ||
-                                  !emailsArray.includes('ismael.charu2025@gmail.com');
-
-              if (hasMismatch || emailsArray.length !== originalLength) {
-                if (!emailsArray.includes('ismael.charu2015@gmail.com')) {
-                  emailsArray.push('ismael.charu2015@gmail.com');
-                }
-                if (!emailsArray.includes('ismael.charu2025@gmail.com')) {
-                  emailsArray.push('ismael.charu2025@gmail.com');
-                }
-                await updateDoc(shopDocRef, {
-                  adminEmails: emailsArray
-                });
-                console.log("Successfully migrated and corrected admin emails format in Firestore settings!");
-              }
-            }
-          } catch (migrateErr) {
-            console.error("Failed to migrate admin emails in settings:", migrateErr);
-          }
-        } else {
-          try {
-            const adminDoc = await getDoc(doc(db, 'admins', user.uid));
-            setIsAdmin(adminDoc.exists());
-          } catch (e) {
-            setIsAdmin(false);
-          }
-        }
-      } else {
-        setIsAdmin(false);
-      }
     });
     return unsub;
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setIsAdmin(false);
+      return;
+    }
+
+    const checkAdminStatus = async () => {
+      const superAdmins = [
+        "ismael.charu2015@gmail.com",
+        "ismael.charu2025@gmail.com"
+      ];
+      const email = currentUser.email || '';
+
+      // 1. Check superAdmin list
+      if (superAdmins.includes(email)) {
+        setIsAdmin(true);
+        // Securely run bootstrap check only for super developers so settings are perfectly initialized in DB if missing.
+        try {
+          const shopDocRef = doc(db, 'settings', 'shop');
+          const shopSnap = await getDoc(shopDocRef);
+          if (shopSnap.exists()) {
+            const data = shopSnap.data();
+            let emailsArray: string[] = [];
+            if (Array.isArray(data.adminEmails)) {
+              emailsArray = data.adminEmails;
+            } else if (typeof data.adminEmails === 'string') {
+              emailsArray = (data.adminEmails as string).split(',').map(e => e.trim()).filter(Boolean);
+            }
+
+            const originalLength = emailsArray.length;
+            if (!emailsArray.includes('ismael.charu2015@gmail.com')) {
+              emailsArray.push('ismael.charu2015@gmail.com');
+            }
+            if (!emailsArray.includes('ismael.charu2025@gmail.com')) {
+              emailsArray.push('ismael.charu2025@gmail.com');
+            }
+
+            if (emailsArray.length !== originalLength) {
+              await updateDoc(shopDocRef, { adminEmails: emailsArray });
+              console.log("Super admin emails initialized in database lists.");
+            }
+          }
+        } catch (err) {
+          console.error("Failed to bootstrap super admins list:", err);
+        }
+        return;
+      }
+
+      // 2. Check shopSettings dynamic list
+      let emailsArray: string[] = [];
+      if (settings?.adminEmails) {
+        if (Array.isArray(settings.adminEmails)) {
+          emailsArray = settings.adminEmails;
+        } else if (typeof settings.adminEmails === 'string') {
+          emailsArray = (settings.adminEmails as string).split(',').map(e => e.trim()).filter(Boolean);
+        }
+      }
+
+      if (email && emailsArray.includes(email)) {
+        setIsAdmin(true);
+        return;
+      }
+
+      // 3. Fallback to admins collection
+      try {
+        const adminDoc = await getDoc(doc(db, 'admins', currentUser.uid));
+        setIsAdmin(adminDoc.exists());
+      } catch (e) {
+        setIsAdmin(false);
+      }
+    };
+
+    checkAdminStatus();
+  }, [currentUser, settings]);
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 

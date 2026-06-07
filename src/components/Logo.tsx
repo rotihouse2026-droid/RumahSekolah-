@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { School } from 'lucide-react';
 import { getGoogleDriveDirectLink } from '../utils/googleDrive';
 
@@ -17,6 +17,13 @@ const Logo: React.FC<LogoProps> = ({
   showText = true,
   className = '',
 }) => {
+  const [hasError, setHasError] = useState(false);
+
+  // Reset error state if logoUrl changes
+  useEffect(() => {
+    setHasError(false);
+  }, [logoUrl]);
+
   // Determine dimensions based on size
   const dimensions = {
     sm: { container: 'h-8 w-8', icon: 16, text: 'text-sm' },
@@ -32,15 +39,14 @@ const Logo: React.FC<LogoProps> = ({
       <div
         className={`${dimensions.container} rounded-2xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-200/50 overflow-hidden shrink-0`}
       >
-        {directLogoUrl ? (
+        {directLogoUrl && !hasError ? (
           <img
             src={directLogoUrl}
             alt={label}
             className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
-            onError={(e) => {
-              // Fallback to text initials if image fails
-              (e.target as HTMLImageElement).style.display = 'none';
+            onError={() => {
+              setHasError(true);
             }}
           />
         ) : (

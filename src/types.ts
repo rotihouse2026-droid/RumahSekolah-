@@ -26,6 +26,7 @@ export interface ShopSettings {
   bankName?: string;
   bankAccountNo?: string;
   bankAccountName?: string;
+  adminEmails?: string | string[];
 }
 
 export interface CartItem {
