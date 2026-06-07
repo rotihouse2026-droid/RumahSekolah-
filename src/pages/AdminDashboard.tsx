@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db, auth } from '../firebase';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, increment, getDoc, serverTimestamp, setDoc, addDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, getCountFromServer, getAggregateFromServer, sum, where } from 'firebase/firestore';
@@ -688,6 +688,22 @@ const AdminDashboard = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showAdminNotifications, setShowAdminNotifications] = useState(false);
   const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
+  const adminDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (adminDropdownRef.current && !adminDropdownRef.current.contains(event.target as Node)) {
+        setShowAdminNotifications(false);
+      }
+    };
+    if (showAdminNotifications) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showAdminNotifications]);
+
   const [actionableCounts, setActionableCounts] = useState({
     pendingOrders: 0,
     pendingSlips: 0,
@@ -2121,7 +2137,84 @@ const AdminDashboard = () => {
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 relative border-slate-100" ref={adminDropdownRef}>
+          {/* Admin Notification Bell */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                setShowAdminNotifications(!showAdminNotifications);
+              }}
+              className={`p-2.5 rounded-xl transition-all duration-200 active:scale-95 flex items-center justify-center relative cursor-pointer ${
+                showAdminNotifications 
+                  ? 'bg-orange-100 text-orange-600 border border-orange-200' 
+                  : 'bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm'
+              }`}
+              title="การแจ้งเตือนงานที่ต้องจัดการ"
+            >
+              <Bell className={`w-5 h-5 ${adminNotifications.length > 0 ? 'animate-pulse text-orange-500' : ''}`} />
+              {adminNotifications.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white font-extrabold text-[10px] min-w-5 h-5 px-1 rounded-full flex items-center justify-center border-2 border-white shadow animate-bounce">
+                  {adminNotifications.length}
+                </span>
+              )}
+            </button>
+
+            {/* Dropdown Container */}
+            <AnimatePresence>
+              {showAdminNotifications && (
+                <motion.div
+                  initial={{ opacity: 0, y: 15, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  transition={{ duration: 0.15, ease: 'easeOut' }}
+                  className="absolute right-0 mt-3 w-80 sm:w-[320px] bg-white border border-slate-100 rounded-2xl shadow-2xl z-50 overflow-hidden"
+                >
+                  <div className="px-5 py-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
+                    <span className="font-extrabold text-sm text-slate-800">งานที่ต้องจัดการด่วน 🛎️</span>
+                    {adminNotifications.length > 0 && (
+                      <span className="bg-red-50 text-red-600 font-extrabold text-[10px] px-2 py-0.5 rounded-full">
+                        {adminNotifications.length} รายการ
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
+                    {adminNotifications.length === 0 ? (
+                      <div className="py-12 px-6 flex flex-col items-center justify-center text-center">
+                        <div className="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-500 mb-2.5">
+                          <CheckCircle2 className="w-6 h-6" />
+                        </div>
+                        <p className="text-xs font-black text-slate-700 font-sans">ลุล่วงหมดทุกงานแล้ว! 🎉</p>
+                        <p className="text-[10px] text-slate-400 mt-1">ไม่มีสถานะงานค้าง ดำเนินการ และสต็อกต่ำที่ด่วนในขณะนี้</p>
+                      </div>
+                    ) : (
+                      adminNotifications.map((noti) => (
+                        <div 
+                          key={noti.id}
+                          onClick={() => {
+                            noti.action();
+                          }}
+                          className="p-4 hover:bg-slate-50 transition cursor-pointer flex gap-3.5 items-start text-left"
+                        >
+                          <div className="p-2 rounded-xl bg-orange-50/50 text-orange-600 flex-shrink-0">
+                            {noti.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-xs font-extrabold text-slate-800 mb-0.5">{noti.title}</h4>
+                            <p className="text-[10px] text-slate-500 font-semibold leading-relaxed">{noti.message}</p>
+                            <span className="inline-flex items-center gap-1 text-[9px] text-orange-600 font-extrabold mt-2 hover:underline">
+                              คลิกเพื่อจัดการทันที →
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           <button 
             onClick={handleLogout}
             className="hidden items-center gap-2 px-4 py-2 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-xl font-bold text-sm transition-all"

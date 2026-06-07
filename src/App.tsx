@@ -16,6 +16,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import Contact from './pages/Contact';
 import { LineContact } from './components/LineContact';
 import { RealtimeNotificationManager } from './components/RealtimeNotificationManager';
+import { NotificationBell } from './components/NotificationBell';
 import { Toaster } from 'sonner';
 import { ShoppingBag, User as UserIcon, Home as HomeIcon, LayoutDashboard, Menu, X, Phone, LogOut } from 'lucide-react';
 
@@ -163,6 +164,9 @@ const Navigation: React.FC = () => {
             )}
           </Link>
 
+          {/* User notification bell */}
+          <NotificationBell />
+
           {currentUser ? (
             <div className="flex items-center gap-2">
               <Link
@@ -202,6 +206,8 @@ const Navigation: React.FC = () => {
               </span>
             )}
           </Link>
+
+          <NotificationBell />
 
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
